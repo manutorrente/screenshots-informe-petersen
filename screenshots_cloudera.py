@@ -15,28 +15,45 @@ if not CLOUDERA_USER or not CLOUDERA_PASSWORD:
 # --- CONFIGURATION ---
 OUTPUT_DIR = "output"
 
-# List of environments to process
+# Unified list of environments with their specific configurations
 ENVIRONMENTS = [
+    # Environments with cluster_id (require health screenshots)
     {
         "label": "1_prod_cloudera",
         "base_url": "http://172.30.215.101:7180",
-        "cluster_id": "1546372102"
+        "cluster_id": "1546372102",
+        "type": "full"  # Includes home, health screenshots
     },
     {
         "label": "16_desa_cloudera",
         "base_url": "http://172.30.213.121:7180",
-        "cluster_id": "1546331798"
+        "cluster_id": "1546331798",
+        "type": "full"
+    },
+    # Environments without cluster_id (only status pane)
+    {
+        "label": "17_cdh_prod",
+        "base_url": "http://172.30.215.201:7180",
+        "type": "status_only"  # Only status pane screenshot
+    },
+    {
+        "label": "18_cdh_desa",
+        "base_url": "http://172.30.213.201:7180",
+        "type": "status_only"
     }
 ]
 
-# Selectors (Shared across environments)
+# Selectors
 SELECTOR_HOME = "#main-page-content"
 SELECTOR_HEALTH = "#allHealthIssuesPanel > div"
+SELECTOR_STATUS_PANE = "#main-page-content > div > div.status-and-charts > div.status-pane"
+
 
 def screenshot_force_shrink(page, selector, file_path):
     """
     Forces the element to shrink to the size of its content (removing whitespace)
     using CSS injection, then crops the padding and saves.
+    Used for home dashboard and health panel screenshots.
     """
     locator = page.locator(selector).first
     
@@ -84,25 +101,84 @@ def screenshot_force_shrink(page, selector, file_path):
         print(f"Error: No bounding box for {selector}")
 
 
-def process_environment(env, playwright_instance):
+def screenshot_smart_crop(page, selector, file_path):
     """
-    Handles the login and screenshot logic for a single environment.
+    Measures the exact dimensions of the internal content (children) 
+    to determine the width AND height, ensuring nothing is cut off.
+    Used for status pane screenshots.
     """
-    label = env['label']
-    base_url = env['base_url']
-    cluster_id = env['cluster_id']
+    locator = page.locator(selector).first
     
-    # Construct URLs dynamically
+    try:
+        locator.wait_for(state="visible", timeout=15000)
+    except:
+        print(f"ERROR: Could not find visible element: {selector}")
+        return
+
+    # Force Overflow Visible
+    locator.evaluate("el => { el.style.height = 'auto'; el.style.overflow = 'visible'; }")
+    time.sleep(0.5)
+
+    # Get the container's raw starting position
+    box = locator.bounding_box()
+    
+    if not box:
+        print(f"Error: No bounding box for {selector}")
+        return
+
+    # Measure Content Dimensions
+    dimensions = locator.evaluate("""container => {
+        const containerRect = container.getBoundingClientRect();
+        let maxRight = 0;
+        let maxBottom = 0;
+        
+        // Loop through all children to find the furthest edges
+        for (let child of container.children) {
+            const rect = child.getBoundingClientRect();
+            if (rect.width > 0 && rect.height > 0) {
+                maxRight = Math.max(maxRight, rect.right);
+                maxBottom = Math.max(maxBottom, rect.bottom);
+            }
+        }
+        
+        // Fallback: if no children, use container dimensions
+        if (maxRight === 0) maxRight = containerRect.right;
+        if (maxBottom === 0) maxBottom = containerRect.bottom;
+
+        // Calculate dimensions relative to the container's top-left corner
+        const calculatedWidth = (maxRight - containerRect.left) + 15;
+        const calculatedHeight = (maxBottom - containerRect.top) + 15;
+        
+        return {
+            width: Math.min(calculatedWidth, containerRect.width),
+            height: Math.max(calculatedHeight, containerRect.height) 
+        };
+    }""")
+
+    # Define the crop area
+    clip_area = {
+        "x": box["x"],
+        "y": box["y"],
+        "width": dimensions["width"], 
+        "height": dimensions["height"]
+    }
+
+    # Take the screenshot
+    if clip_area["width"] > 0 and clip_area["height"] > 0:
+        page.screenshot(path=file_path, clip=clip_area)
+        print(f"Screenshot saved: {file_path}")
+    else:
+        print("Warning: Calculation failed. Taking standard screenshot.")
+        locator.screenshot(path=file_path)
+
+
+def login(page, base_url, label):
+    """
+    Performs login for any environment.
+    Returns True if successful, False otherwise.
+    """
     url_login = f"{base_url}/cmf/login"
-    url_health = f"{base_url}/cmf/allHealthIssues?clusterId={cluster_id}"
-
-    print(f"\n--- Starting processing for {label} ({base_url}) ---")
     
-    # Launch browser
-    browser = playwright_instance.chromium.launch(headless=True)
-    page = browser.new_page()
-
-    # --- STEP 1: LOGIN ---
     print(f"[{label}] Logging in...")
     page.goto(url_login)
     page.fill('input[name="j_username"]', CLOUDERA_USER)
@@ -112,28 +188,36 @@ def process_environment(env, playwright_instance):
     try:
         page.wait_for_url("**/cmf/home", timeout=20000)
         print(f"[{label}] Login successful.")
+        return True
     except:
         print(f"[{label}] Login failed or timed out.")
-        # Save error screenshot to output dir
-        page.screenshot(path=os.path.join(OUTPUT_DIR, f"error_login_{label}.png"))
-        browser.close()
-        return
+        page.screenshot(path=os.path.join(OUTPUT_DIR, f"{label}_error_login.png"))
+        return False
+
+
+def process_full_environment(page, env):
+    """
+    Process environments with full dashboard and health screenshots.
+    """
+    label = env['label']
+    base_url = env['base_url']
+    cluster_id = env['cluster_id']
+    url_health = f"{base_url}/cmf/allHealthIssues?clusterId={cluster_id}"
 
     page.wait_for_load_state("networkidle")
     time.sleep(2)
 
-    # --- STEP 2: HOME SCREENSHOT ---
+    # --- HOME SCREENSHOT ---
     print(f"[{label}] Capturing Home Dashboard...")
-    # Construct full path: output/dashboard_env1_101.png
-    file_path_home = os.path.join(OUTPUT_DIR, f"dashboard_{label}.png")
+    file_path_home = os.path.join(OUTPUT_DIR, f"{label}_dashboard.png")
     screenshot_force_shrink(page, SELECTOR_HOME, file_path_home)
 
-    # --- STEP 3: NAVIGATE TO HEALTH ISSUES ---
+    # --- NAVIGATE TO HEALTH ISSUES ---
     print(f"[{label}] Navigating to Health Issues...")
     page.goto(url_health)
     page.wait_for_load_state("networkidle")
 
-    # --- STEP 4: CLICK BUTTON ---
+    # --- CLICK BUTTON ---
     print(f"[{label}] Clicking 'Organize By Health Test'...")
     try:
         btn = page.locator("text=/Organi.*By Health Test/i")
@@ -145,15 +229,70 @@ def process_environment(env, playwright_instance):
     page.wait_for_load_state("networkidle")
     time.sleep(2)
 
-    # --- STEP 5: HEALTH SCREENSHOT ---
+    # --- HEALTH SCREENSHOT ---
     print(f"[{label}] Capturing Health Panel...")
-    file_path_health = os.path.join(OUTPUT_DIR, f"health_{label}.png")
+    file_path_health = os.path.join(OUTPUT_DIR, f"{label}_health.png")
     screenshot_force_shrink(page, SELECTOR_HEALTH, file_path_health)
+
+
+def process_status_only_environment(page, env):
+    """
+    Process environments with only status pane screenshot.
+    """
+    label = env['label']
+
+    page.wait_for_load_state("networkidle")
+    time.sleep(2)
+
+    # --- STATUS PANE SCREENSHOT ---
+    print(f"[{label}] Capturing Status Pane...")
+    file_path = os.path.join(OUTPUT_DIR, f"{label}_status_pane.png")
+    screenshot_smart_crop(page, SELECTOR_STATUS_PANE, file_path)
+
+
+def process_environment(env, playwright_instance):
+    """
+    Handles the login and screenshot logic for a single environment.
+    Routes to appropriate processing function based on environment type.
+    """
+    label = env['label']
+    base_url = env['base_url']
+    env_type = env['type']
     
-    print(f"[{label}] Completed.")
-    browser.close()
+    print(f"\n--- Starting processing for {label} ({base_url}) ---")
+    
+    # Launch browser with appropriate viewport
+    # Status-only environments need larger viewport for full page rendering
+    if env_type == "status_only":
+        browser = playwright_instance.chromium.launch(headless=True)
+        page = browser.new_page(viewport={"width": 1920, "height": 4500})
+    else:
+        browser = playwright_instance.chromium.launch(headless=True)
+        page = browser.new_page()
+
+    # --- LOGIN ---
+    if not login(page, base_url, label):
+        browser.close()
+        return
+
+    # --- PROCESS BASED ON TYPE ---
+    try:
+        if env_type == "full":
+            process_full_environment(page, env)
+        elif env_type == "status_only":
+            process_status_only_environment(page, env)
+        
+        print(f"[{label}] Completed.")
+    except Exception as e:
+        print(f"ERROR during processing {label}: {e}")
+    finally:
+        browser.close()
+
 
 def run_all():
+    """
+    Main entry point - processes all environments.
+    """
     # Ensure output directory exists
     if not os.path.exists(OUTPUT_DIR):
         os.makedirs(OUTPUT_DIR)
@@ -166,5 +305,4 @@ def run_all():
             except Exception as e:
                 print(f"CRITICAL ERROR processing {env['label']}: {e}")
 
-if __name__ == "__main__":
-    run_all()
+

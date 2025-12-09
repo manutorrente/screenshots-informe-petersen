@@ -3,3 +3,8 @@
 output/*
 
 google apis*
+
+.venv/
+
+*pyc
+__pycache__/

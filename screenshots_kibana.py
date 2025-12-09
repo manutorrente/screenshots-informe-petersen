@@ -2,6 +2,12 @@ from playwright.sync_api import sync_playwright
 import time
 import os
 import re
+from dotenv import load_dotenv
+
+load_dotenv(override=True)
+
+USER=os.getenv("ELASTIC_USER", "elastic")
+PASSWORD=os.getenv("ELASTIC_PASSWORD", "")
 
 def tomar_captura_kibana(page, url, nombre_archivo, output_dir="output"):
     """Toma una captura de pantalla de un panel específico de Kibana"""
@@ -69,8 +75,8 @@ def ejecutar_capturas_batch(urls, output_dir="output"):
             print("Detectado login, ingresando credenciales...")
             page.wait_for_selector("input[name='username']", timeout=10000)
             
-            page.fill("input[name='username']", "elastic")
-            page.fill("input[name='password']", "qZm6hg_uamPr3Lo7NQa*")
+            page.fill("input[name='username']", USER)
+            page.fill("input[name='password']", PASSWORD)
             page.click("button[type='submit']")
             
             # Esperar a que redirija post-login
@@ -108,4 +114,6 @@ urls = {
 }
 
 # Ejecutar todas las capturas en batch
-ejecutar_capturas_batch(urls)
+
+def run():
+    ejecutar_capturas_batch(urls, output_dir="output")
