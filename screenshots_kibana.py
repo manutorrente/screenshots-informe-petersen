@@ -53,7 +53,7 @@ def ejecutar_capturas_batch(urls, output_dir="output"):
         os.makedirs(output_dir, exist_ok=True)
         
         # headless=False para ver el proceso (cambiar a True cuando funcione bien)
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=True)
         
         # Ajustar el tamaño del viewport para que la captura salga en HD
         context = browser.new_context(viewport={"width": 1920, "height": 1080})
