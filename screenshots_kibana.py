@@ -33,8 +33,8 @@ def tomar_captura_kibana(page, url, nombre_archivo, output_dir="output"):
     # Sleep extra de seguridad por si las animaciones de carga tardan
     time.sleep(10)
 
-    # Aplicar zoom para mejorar la claridad del texto
-    page.evaluate("document.body.style.zoom = '150%'")
+    # Aplicar zoom para mejorar la claridad del texto y las leyendas
+    page.evaluate("document.body.style.zoom = '200%'")
     time.sleep(2)
 
     # Extraer el panel ID de la URL y sacar screenshot del panel específico
@@ -51,15 +51,15 @@ def tomar_captura_kibana(page, url, nombre_archivo, output_dir="output"):
     
     print(f"Captura guardada: {output_path}")
 
-def ejecutar_capturas_batch(urls, output_dir="output"):
+def ejecutar_capturas_batch(urls, output_dir="output", headless=True):
     """Ejecuta todas las capturas usando una sola sesión de navegador"""
     
     with sync_playwright() as p:
         # Crear directorio de salida si no existe
         os.makedirs(output_dir, exist_ok=True)
         
-        # headless=False para ver el proceso (cambiar a True cuando funcione bien)
-        browser = p.chromium.launch(headless=True)
+        # headless parameter controls browser visibility
+        browser = p.chromium.launch(headless=headless)
         
         # Ajustar el tamaño del viewport para que la captura salga en HD
         context = browser.new_context(viewport={"width": 1920, "height": 1080})
@@ -73,7 +73,7 @@ def ejecutar_capturas_batch(urls, output_dir="output"):
         # Si la URL cambia a 'login', llenamos los datos
         if "login" in page.url:
             print("Detectado login, ingresando credenciales...")
-            page.wait_for_selector("input[name='username']", timeout=10000)
+            page.wait_for_selector("input[name='username']", timeout=20000)
             
             page.fill("input[name='username']", USER)
             page.fill("input[name='password']", PASSWORD)
@@ -115,5 +115,5 @@ urls = {
 
 # Ejecutar todas las capturas en batch
 
-def run():
-    ejecutar_capturas_batch(urls, output_dir="output")
+def run(headless=True):
+    ejecutar_capturas_batch(urls, output_dir="output", headless=headless)

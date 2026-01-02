@@ -1,6 +1,7 @@
 from screenshots_cloudera import run_all
 from screenshots_kibana import run
 import os
+import argparse
 
 OUTPUT_DIR = "output"
 
@@ -15,5 +16,21 @@ if os.path.exists(OUTPUT_DIR):
 
 
 if __name__ == "__main__":
-    run_all()
-    run()
+    parser = argparse.ArgumentParser(description="Take screenshots from Kibana and Cloudera dashboards")
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        default=True,
+        help="Run browser in headless mode (default: True)"
+    )
+    parser.add_argument(
+        "--no-headless",
+        dest="headless",
+        action="store_false",
+        help="Run browser with visible UI"
+    )
+    args = parser.parse_args()
+    
+    print(f"Running in {'headless' if args.headless else 'visible'} mode...")
+    run_all(headless=args.headless)
+    run(headless=args.headless)

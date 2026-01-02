@@ -263,11 +263,12 @@ def process_environment(env, playwright_instance):
     
     # Launch browser with appropriate viewport
     # Status-only environments need larger viewport for full page rendering
+    headless = env.get('headless', True)
     if env_type == "status_only":
-        browser = playwright_instance.chromium.launch(headless=True)
+        browser = playwright_instance.chromium.launch(headless=headless)
         page = browser.new_page(viewport={"width": 1920, "height": 4500})
     else:
-        browser = playwright_instance.chromium.launch(headless=True)
+        browser = playwright_instance.chromium.launch(headless=headless)
         page = browser.new_page()
 
     # --- LOGIN ---
@@ -289,7 +290,7 @@ def process_environment(env, playwright_instance):
         browser.close()
 
 
-def run_all():
+def run_all(headless=True):
     """
     Main entry point - processes all environments.
     """
@@ -301,6 +302,8 @@ def run_all():
     with sync_playwright() as p:
         for env in ENVIRONMENTS:
             try:
+                # Add headless parameter to environment config
+                env['headless'] = headless
                 process_environment(env, p)
             except Exception as e:
                 print(f"CRITICAL ERROR processing {env['label']}: {e}")
